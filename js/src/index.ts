@@ -1,7 +1,7 @@
 // ayCORD JS entrypoint — evaluated on Discord's RN bridge after its own bundle.
 import antiDelete from "./plugins/anti-delete";
 import vault from "./plugins/vault";
-import menu from "./plugins/menu";
+import menu, { menuStatus, note } from "./plugins/menu";
 import { initStorage } from "./core/storage";
 
 export interface Plugin {
@@ -32,6 +32,10 @@ function startPlugins() {
     unload: () => plugins.forEach((p) => { try { p.stop(); } catch {} }),
   };
   console.log("[ayCORD] ready");
+
+  // Visible confirmation that the payload runs (no console needed on device).
+  const where = menuStatus.settings === "none" ? "اكتب .ayc بأي محادثة" : "الإعدادات ← ayCORD";
+  setTimeout(() => note("ayCORD اشتغل ✅ — " + where), 1500);
 }
 
 async function boot() {

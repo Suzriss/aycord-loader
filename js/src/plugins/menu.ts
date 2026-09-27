@@ -1,9 +1,9 @@
 // ayCORD menu — a row at the TOP of Discord settings that opens the ayCORD
 // controls, plus a guaranteed "/ayc" chat-command fallback that opens the same
 // menu (in case the settings injection doesn't bind on a given Discord build).
-import { after, instead } from "../core/patcher";
+import { after, before, instead } from "../core/patcher";
 import { findByProps } from "../core/metro";
-import { React, actionSheet, prompt, SettingsOverview } from "../core/ui";
+import { React, Alert, actionSheet, prompt, SettingsOverview } from "../core/ui";
 import { SelectedChannelStore } from "../core/api";
 import { storage } from "../core/storage";
 import type { Plugin } from "../index";
@@ -37,13 +37,13 @@ export function openMenu() {
   ]);
 }
 
-function note(msg: string) {
+export function note(msg: string) {
   try {
     const T: any = findByProps("showToast");
-    const mk: any = findByProps("createToast");
-    if (T?.showToast && mk?.createToast) return T.showToast(mk.createToast(String(msg), 1));
+    if (T?.showToast) return T.showToast(String(msg));
   } catch {}
   console.log("[ayCORD] " + msg);
+  try { Alert()?.alert?.("ayCORD", String(msg)); } catch {}
 }
 
 // Build the settings row element.
@@ -71,13 +71,59 @@ function injectTop(tree: any, el: any): boolean {
   return false;
 }
 
+// Newer Discord builds render settings from a config table
+// (SETTING_RENDERER_CONFIG, keyed rows) laid out by createList({ sections }).
+// We register a "pressable" row and put it in a section at the very top.
+const ROW_KEY = "AYCORD_MENU";
+
+function hookSettingsConfig(unpatches: Array<() => void>): boolean {
+  const consts: any = findByProps("SETTING_RENDERER_CONFIG");
+  const listMod: any = findByProps("createList");
+  if (!consts || !listMod?.createList) return false;
+
+  const row = {
+    type: "pressable",
+    title: () => "ayCORD",
+    onPress: openMenu,
+    usePredicate: () => true,
+  };
+  let cfg = consts.SETTING_RENDERER_CONFIG;
+  try {
+    Object.defineProperty(consts, "SETTING_RENDERER_CONFIG", {
+      configurable: true, enumerable: true,
+      get: () => ({ ...cfg, [ROW_KEY]: row }),
+      set: (v) => { cfg = v; },
+    });
+  } catch {
+    cfg[ROW_KEY] = row;   // frozen export object: mutate the table itself
+  }
+
+  unpatches.push(
+    before(listMod, "createList", (args: any[]) => {
+      const sections = args?.[0]?.sections;
+      if (!Array.isArray(sections)) return;
+      const isMain = sections.some((s: any) =>
+        Array.isArray(s?.settings) && (s.settings.includes("ACCOUNT") || s.settings.includes("LOGOUT")));
+      if (!isMain || sections.some((s: any) => s?.settings?.includes?.(ROW_KEY))) return;
+      sections.unshift({ label: "ayCORD", title: "ayCORD", settings: [ROW_KEY] });
+    })
+  );
+  return true;
+}
+
+export const menuStatus = { settings: "none", command: false };
+
 const plugin: Plugin = {
   id: "menu",
   name: "منيو الإعدادات",
   unpatches: [],
 
   start() {
-    // 1) Settings row at the very top.
+    // 1) Settings row at the very top — new config-driven settings first.
+    if (hookSettingsConfig(this.unpatches)) {
+      menuStatus.settings = "config";
+      console.log("[ayCORD] settings row hooked (config)");
+    }
     const ov: any = SettingsOverview();
     const holder = ov && ("default" in ov ? ov : { default: ov });
     if (holder?.default) {
@@ -88,8 +134,9 @@ const plugin: Plugin = {
           return ret;
         })
       );
-      console.log("[ayCORD] settings row hooked");
-    } else {
+      if (menuStatus.settings === "none") menuStatus.settings = "overview";
+      console.log("[ayCORD] settings row hooked (overview)");
+    } else if (menuStatus.settings === "none") {
       console.log("[ayCORD] SettingsOverviewScreen not found — use /ayc");
     }
 
@@ -106,6 +153,7 @@ const plugin: Plugin = {
           return orig.apply(MA, args);
         })
       );
+      menuStatus.command = true;
       console.log("[ayCORD] /ayc command ready");
     }
   },
