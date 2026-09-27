@@ -4,6 +4,7 @@ import vault from "./plugins/vault";
 import menu, { menuStatus, note } from "./plugins/menu";
 import { initStorage } from "./core/storage";
 import { metroDiag, findByProps, findByName, findByNameHolder } from "./core/metro";
+import { patchStats } from "./core/patcher";
 
 // Metro-independent native alert: reach RN's AlertManager straight through the
 // TurboModule / native-module proxy globals, without going through the module
@@ -81,6 +82,7 @@ function probe(): string {
     "showToast: " + yn(findByProps("showToast")),
     "FormRow: " + yn(findByProps("FormRow")),
     "actionSheet: " + yn(findByProps("showSimpleActionSheet")),
+    "patches ok/fail: " + patchStats.installed + "/" + patchStats.failed,
     "bound → settings:" + menuStatus.settings + " /ayc:" + (menuStatus.command ? "on" : "off"),
   ].join("\n");
 }

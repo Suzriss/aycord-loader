@@ -81,11 +81,17 @@ function hookSettingsConfig(unpatches: Array<() => void>): boolean {
   const listMod: any = findByProps("createList");
   if (!consts || !listMod?.createList) return false;
 
+  // Shape mirrors Discord's own pressable rows in SETTING_RENDERER_CONFIG.
   const row = {
     type: "pressable",
     title: () => "ayCORD",
+    description: () => "الخصوصية والمميزات",
     onPress: openMenu,
     usePredicate: () => true,
+    useTrailing: undefined as any,
+    IconComponent: undefined as any,
+    withArrow: true,
+    screen: undefined as any,
   };
   let cfg = consts.SETTING_RENDERER_CONFIG;
   try {
@@ -118,27 +124,34 @@ const plugin: Plugin = {
   name: "منيو الإعدادات",
   unpatches: [],
 
-  // Idempotent: install the settings row. Returns true once bound.
+  // Idempotent: install the settings row. Prefer the data-driven config path
+  // (no render-fn patching); keep the overview render patch only as a last
+  // resort, and don't let it block the config path from binding.
   installSettings(): boolean {
-    if (menuStatus.settings !== "none") return true;
-    if (hookSettingsConfig(this.unpatches)) {
-      menuStatus.settings = "config";
-      console.log("[ayCORD] settings row hooked (config)");
-      return true;
-    }
-    // Patch the REAL module holder (patching a copied ref never fires).
-    const h = findByNameHolder("SettingsOverviewScreen");
-    if (h?.mod && typeof h.mod[h.key] === "function") {
-      this.unpatches.push(
-        after(h.mod, h.key, (_args: any[], ret: any) => {
-          try { const el = buildRow(); if (el) injectTop(ret, el); }
-          catch (e) { console.log("[ayCORD] settings inject failed: " + e); }
-          return ret;
-        })
-      );
-      menuStatus.settings = "overview";
-      console.log("[ayCORD] settings row hooked (overview, real holder)");
-      return true;
+    if (menuStatus.settings === "config") return true;
+    try {
+      if (hookSettingsConfig(this.unpatches)) {
+        menuStatus.settings = "config";
+        console.log("[ayCORD] settings row hooked (config)");
+        return true;
+      }
+    } catch (e) { console.log("[ayCORD] config hook failed: " + e); }
+
+    // Last-resort render patch — only once, and we still return false so the
+    // retry loop keeps trying the (reliable) config path as modules settle.
+    if (menuStatus.settings === "none") {
+      const h = findByNameHolder("SettingsOverviewScreen");
+      if (h?.mod && typeof h.mod[h.key] === "function") {
+        this.unpatches.push(
+          after(h.mod, h.key, (_args: any[], ret: any) => {
+            try { const el = buildRow(); if (el) injectTop(ret, el); }
+            catch (e) { console.log("[ayCORD] settings inject failed: " + e); }
+            return ret;
+          })
+        );
+        menuStatus.settings = "overview";
+        console.log("[ayCORD] settings row hooked (overview, real holder)");
+      }
     }
     return false;
   },
@@ -146,28 +159,32 @@ const plugin: Plugin = {
   // Idempotent: install the "/ayc" chat-command fallback. Returns true once bound.
   installCommand(): boolean {
     if (menuStatus.command) return true;
-    const MA: any = findByProps("sendMessage", "receiveMessage") || findByProps("sendMessage");
-    if (!MA?.sendMessage) return false;
-    this.unpatches.push(
-      instead(MA, "sendMessage", (args: any[], orig: any) => {
-        const content = (args?.[1]?.content ?? "").trim().toLowerCase();
-        if (content === "/ayc" || content === ".ayc" || content === "/aycord") {
-          setTimeout(openMenu, 50);
-          return Promise.resolve(void 0);   // swallow the command message
-        }
-        return orig.apply(MA, args);
-      })
-    );
-    menuStatus.command = true;
-    console.log("[ayCORD] /ayc command ready");
-    return true;
+    try {
+      const MA: any = findByProps("sendMessage", "editMessage") || findByProps("sendMessage");
+      if (!MA?.sendMessage) return false;
+      this.unpatches.push(
+        instead(MA, "sendMessage", function (this: any, args: any[], orig: any) {
+          const content = (args?.[1]?.content ?? "").trim().toLowerCase();
+          if (content === "/ayc" || content === ".ayc" || content === "/aycord") {
+            setTimeout(openMenu, 50);
+            return Promise.resolve(void 0);   // swallow the command message
+          }
+          return orig.apply(this, args);
+        })
+      );
+      menuStatus.command = true;
+      console.log("[ayCORD] /ayc command ready");
+      return true;
+    } catch (e) { console.log("[ayCORD] command hook failed: " + e); return false; }
   },
 
   start() {
     // Some modules (messaging, settings) only become requireable after login,
     // so a one-shot install at boot misses them. Install what's ready now, then
     // retry the rest on a schedule until both bind (or we give up after ~90s).
-    const tryAll = () => this.installSettings() && this.installCommand();
+    // Call BOTH every tick (no && short-circuit) so /ayc keeps retrying even
+    // while the settings row is still waiting to bind.
+    const tryAll = () => { const a = this.installSettings(); const b = this.installCommand(); return a && b; };
     if (tryAll()) return;
 
     let tries = 0;

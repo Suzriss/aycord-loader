@@ -13,6 +13,10 @@ interface PatchRecord {
 
 const patched = new WeakMap<object, Record<string, PatchRecord>>();
 
+// Diagnostic: how many property replacements actually took vs. were rejected by
+// a frozen/non-configurable target.
+export const patchStats = { installed: 0, failed: 0 };
+
 function ensure(obj: any, key: string): PatchRecord {
   let map = patched.get(obj);
   if (!map) { map = {}; patched.set(obj, map); }
@@ -42,22 +46,41 @@ function ensure(obj: any, key: string): PatchRecord {
   };
 
   try { Object.defineProperties(replacement, Object.getOwnPropertyDescriptors(original)); } catch {}
-  obj[key] = replacement;
+
+  // Discord's module exports are often frozen or getter-backed, so a plain
+  // `obj[key] = replacement` silently no-ops (hook never fires) or throws in
+  // strict mode (killing our caller). Assign, verify it took, and fall back to
+  // defineProperty; never throw.
+  let installed = false;
+  try { obj[key] = replacement; installed = obj[key] === replacement; } catch {}
+  if (!installed) {
+    try {
+      Object.defineProperty(obj, key, { value: replacement, writable: true, configurable: true, enumerable: true });
+      installed = obj[key] === replacement;
+    } catch {}
+  }
+  if (installed) patchStats.installed++;
+  else { patchStats.failed++; console.log(`[ayCORD] patch of ${key} did not take (frozen/non-configurable)`); }
   map[key] = rec;
   return rec;
 }
 
 function add(kind: "before" | "instead" | "after", obj: any, key: string, hook: Hook): Unpatch {
-  if (!obj || typeof obj[key] !== "function") {
-    console.log(`[ayCORD] patch target ${key} is not a function`);
+  try {
+    if (!obj || typeof obj[key] !== "function") {
+      console.log(`[ayCORD] patch target ${key} is not a function`);
+      return () => {};
+    }
+    const rec = ensure(obj, key);
+    rec[kind].push(hook);
+    return () => {
+      const i = rec[kind].indexOf(hook);
+      if (i >= 0) rec[kind].splice(i, 1);
+    };
+  } catch (e) {
+    console.log(`[ayCORD] patch ${key} failed: ${e}`);
     return () => {};
   }
-  const rec = ensure(obj, key);
-  rec[kind].push(hook);
-  return () => {
-    const i = rec[kind].indexOf(hook);
-    if (i >= 0) rec[kind].splice(i, 1);
-  };
 }
 
 export const before  = (obj: any, key: string, hook: Hook) => add("before", obj, key, hook);
