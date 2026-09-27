@@ -93,31 +93,44 @@ function hookSettingsConfig(unpatches: Array<() => void>): boolean {
     withArrow: true,
     screen: undefined as any,
   };
-  let cfg = consts.SETTING_RENDERER_CONFIG;
+  // Register our row in the renderer config. Prefer a plain mutation of the
+  // table (works on most builds); only if that's rejected fall back to
+  // redefining the whole property as a merged getter. Never throw.
+  let added = false;
   try {
-    Object.defineProperty(consts, "SETTING_RENDERER_CONFIG", {
-      configurable: true, enumerable: true,
-      get: () => ({ ...cfg, [ROW_KEY]: row }),
-      set: (v) => { cfg = v; },
-    });
-  } catch {
-    cfg[ROW_KEY] = row;   // frozen export object: mutate the table itself
+    const table: any = consts.SETTING_RENDERER_CONFIG;
+    if (table && table[ROW_KEY]) added = true;
+    else if (table) { table[ROW_KEY] = row; added = table[ROW_KEY] === row; }
+  } catch {}
+  if (!added) {
+    try {
+      let cfg = consts.SETTING_RENDERER_CONFIG;
+      Object.defineProperty(consts, "SETTING_RENDERER_CONFIG", {
+        configurable: true, enumerable: true,
+        get: () => ({ ...cfg, [ROW_KEY]: row }),
+        set: (v) => { cfg = v; },
+      });
+      added = !!consts.SETTING_RENDERER_CONFIG?.[ROW_KEY];
+    } catch {}
   }
+  if (!added) return false;   // couldn't register the row → let overview handle it
 
   unpatches.push(
     before(listMod, "createList", (args: any[]) => {
-      const sections = args?.[0]?.sections;
-      if (!Array.isArray(sections)) return;
-      const isMain = sections.some((s: any) =>
-        Array.isArray(s?.settings) && (s.settings.includes("ACCOUNT") || s.settings.includes("LOGOUT")));
-      if (!isMain || sections.some((s: any) => s?.settings?.includes?.(ROW_KEY))) return;
-      sections.unshift({ label: "ayCORD", title: "ayCORD", settings: [ROW_KEY] });
+      try {
+        const sections = args?.[0]?.sections;
+        if (!Array.isArray(sections)) return;
+        const isMain = sections.some((s: any) =>
+          Array.isArray(s?.settings) && (s.settings.includes("ACCOUNT") || s.settings.includes("LOGOUT")));
+        if (!isMain || sections.some((s: any) => s?.settings?.includes?.(ROW_KEY))) return;
+        sections.unshift({ label: "ayCORD", title: "ayCORD", settings: [ROW_KEY] });
+      } catch {}
     })
   );
   return true;
 }
 
-export const menuStatus = { settings: "none", command: false };
+export const menuStatus = { settings: "none", command: false, overviewFired: false };
 
 const plugin: Plugin = {
   id: "menu",
@@ -144,6 +157,7 @@ const plugin: Plugin = {
       if (h?.mod && typeof h.mod[h.key] === "function") {
         this.unpatches.push(
           after(h.mod, h.key, (_args: any[], ret: any) => {
+            menuStatus.overviewFired = true;   // proves Discord calls our patched export
             try { const el = buildRow(); if (el) injectTop(ret, el); }
             catch (e) { console.log("[ayCORD] settings inject failed: " + e); }
             return ret;

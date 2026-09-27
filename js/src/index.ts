@@ -61,9 +61,19 @@ function startPlugins() {
   const where = menuStatus.settings === "none" ? "اكتب .ayc بأي محادثة" : "الإعدادات ← ayCORD";
   setTimeout(() => note("ayCORD اشتغل ✅ — " + where), 1500);
 
-  // Detailed probe ~30s after boot (by then the user is usually logged in), so
-  // one screenshot shows exactly which finders resolve. Purely diagnostic.
-  setTimeout(() => rnNativeAlert("ayCORD probe", probe()), 30000);
+  // Report once the menu actually settles (both bound), or after ~95s — so the
+  // alert shows the true final state instead of a mid-retry snapshot.
+  let watch = 0;
+  const check = () => {
+    watch++;
+    const settled = menuStatus.command && menuStatus.settings !== "none";
+    if (settled || watch >= 48) {
+      rnNativeAlert(settled ? "ayCORD ✓ جاهز" : "ayCORD probe", probe());
+      return;
+    }
+    setTimeout(check, 2000);
+  };
+  setTimeout(check, 3000);
 }
 
 function yn(x: any): string { return x ? "Y" : "N"; }
@@ -83,6 +93,7 @@ function probe(): string {
     "FormRow: " + yn(findByProps("FormRow")),
     "actionSheet: " + yn(findByProps("showSimpleActionSheet")),
     "patches ok/fail: " + patchStats.installed + "/" + patchStats.failed,
+    "overviewFired: " + yn(menuStatus.overviewFired),
     "bound → settings:" + menuStatus.settings + " /ayc:" + (menuStatus.command ? "on" : "off"),
   ].join("\n");
 }
