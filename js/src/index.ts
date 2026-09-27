@@ -60,21 +60,19 @@ function startPlugins() {
   const where = menuStatus.settings === "none" ? "اكتب .ayc بأي محادثة" : "الإعدادات ← ayCORD";
   setTimeout(() => note("ayCORD اشتغل ✅ — " + where), 1500);
 
-  // Metro-independent diagnostic alert: proves the payload evaluated and shows
-  // exactly what metro saw — so we can tell "didn't run" from "found nothing".
+  // One concise confirmation. Settings/‏/ayc may still be "off" here if shown on
+  // the login screen — they bind via retry once Discord finishes loading.
   const d = metroDiag();
   setTimeout(() => rnNativeAlert(
-    "ayCORD JS ✓",
-    "الـpayload اشتغل\nrequire: " + d.req + "\nmodules: " + d.count +
-    "\nsettings: " + menuStatus.settings + " | /ayc: " + (menuStatus.command ? "on" : "off")
-  ), 800);
+    "ayCORD ✓",
+    "اشتغل — modules: " + d.count +
+    "\nصف الإعدادات: " + (menuStatus.settings !== "none" ? "جاهز" : "ينتظر") +
+    " | /ayc: " + (menuStatus.command ? "on" : "ينتظر الدخول") +
+    "\n(سجّل دخول، بعدين افتح الإعدادات أو اكتب ‎.ayc)"
+  ), 1200);
 }
 
 async function boot() {
-  // Earliest possible proof the payload evaluated — before anything can fail.
-  rnNativeAlert("ayCORD JS boot", "بدأ التشغيل — require=" +
-    (typeof (globalThis as any).__r === "function" ? "__r" :
-     typeof (globalThis as any).metroRequire === "function" ? "metroRequire" : "NONE"));
   await initStorage();      // load persisted vault/config from MMKV first
   startPlugins();
 }

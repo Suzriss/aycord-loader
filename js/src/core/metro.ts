@@ -52,21 +52,63 @@ function moduleIds(r: (id: number) => any): number[] {
   return range(0, 40000);
 }
 
-function allModules(): any[] {
-  if (cache.length) return cache;
-  const r = metroRequire();
-  if (!r) return cache;   // nothing we can do without require
+// Discord registers every module factory up front, but requiring a module
+// before its dependencies are ready (e.g. messaging/settings modules on the
+// login screen) throws. We index what we can, remember the ids that threw for
+// a *runtime* reason, and retry only those later — so post-login modules get
+// picked up without re-scanning the whole 40k id space.
+let scanned = false;
+let pending: number[] = [];
+let lastRescan = 0;
 
-  let attempted = 0, threw = 0;
-  for (const id of moduleIds(r)) {
-    let exp: any;
-    attempted++;
-    try { exp = r(id); } catch { threw++; continue; }
-    if (exp == null) continue;
-    cache.push(exp);
-    if (exp.default && exp.__esModule) cache.push(exp.default);
+function indexId(r: (id: number) => any, id: number): "ok" | "absent" | "threw" {
+  let exp: any;
+  try { exp = r(id); }
+  catch (e: any) {
+    const msg = String((e && e.message) || e);
+    // "unknown/undefined module" == this id simply isn't a module → never retry.
+    return /unknown module|has not been defined|Requiring unknown/i.test(msg) ? "absent" : "threw";
   }
-  console.log(`[ayCORD] indexed ${cache.length} modules (tried ${attempted}, ${threw} threw)`);
+  if (exp == null) return "absent";
+  cache.push(exp);
+  if (exp.default && exp.__esModule) cache.push(exp.default);
+  return "ok";
+}
+
+function fullScan(): void {
+  const r = metroRequire();
+  if (!r) { scanned = true; return; }
+  const ids = moduleIds(r);
+  let ok = 0, absent = 0, threw = 0;
+  pending = [];
+  for (const id of ids) {
+    const res = indexId(r, id);
+    if (res === "ok") ok++;
+    else if (res === "absent") absent++;
+    else { threw++; pending.push(id); }
+  }
+  scanned = true;
+  console.log(`[ayCORD] indexed ${cache.length} exports (${ok} ok, ${absent} absent, ${threw} pending) from ${ids.length} ids`);
+}
+
+// Retry ids that threw before — cheap, throttled, and shrinks as they succeed.
+function rescanPending(): number {
+  const r = metroRequire();
+  if (!r || !pending.length) return 0;
+  const now = Date.now();
+  if (now - lastRescan < 800) return 0;
+  lastRescan = now;
+  const before = cache.length;
+  const still: number[] = [];
+  for (const id of pending) { if (indexId(r, id) !== "ok") still.push(id); }
+  const gained = cache.length - before;
+  if (gained) console.log(`[ayCORD] rescan +${gained} exports (${still.length} still pending)`);
+  pending = still;
+  return gained;
+}
+
+function allModules(): any[] {
+  if (!scanned) fullScan();
   return cache;
 }
 
@@ -87,8 +129,19 @@ export function metroDiag(): { req: string; count: number } {
 }
 
 export function find(filter: Filter): any {
-  for (const m of allModules()) {
+  const mods = allModules();
+  for (const m of mods) {
     try { if (filter(m)) return m; } catch {}
+  }
+  // Self-heal: a module we need may only have become requireable after login.
+  // Retry the pending ids (throttled) and scan just the newly-added exports.
+  if (pending.length) {
+    const before = cache.length;
+    if (rescanPending() > 0) {
+      for (let i = before; i < cache.length; i++) {
+        try { if (filter(cache[i])) return cache[i]; } catch {}
+      }
+    }
   }
   return undefined;
 }

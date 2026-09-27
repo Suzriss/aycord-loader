@@ -118,11 +118,13 @@ const plugin: Plugin = {
   name: "منيو الإعدادات",
   unpatches: [],
 
-  start() {
-    // 1) Settings row at the very top — new config-driven settings first.
+  // Idempotent: install the settings row. Returns true once bound.
+  installSettings(): boolean {
+    if (menuStatus.settings !== "none") return true;
     if (hookSettingsConfig(this.unpatches)) {
       menuStatus.settings = "config";
       console.log("[ayCORD] settings row hooked (config)");
+      return true;
     }
     const ov: any = SettingsOverview();
     const holder = ov && ("default" in ov ? ov : { default: ov });
@@ -134,28 +136,50 @@ const plugin: Plugin = {
           return ret;
         })
       );
-      if (menuStatus.settings === "none") menuStatus.settings = "overview";
+      menuStatus.settings = "overview";
       console.log("[ayCORD] settings row hooked (overview)");
-    } else if (menuStatus.settings === "none") {
-      console.log("[ayCORD] SettingsOverviewScreen not found — use /ayc");
+      return true;
     }
+    return false;
+  },
 
-    // 2) Guaranteed fallback: "/ayc" chat command opens the menu.
+  // Idempotent: install the "/ayc" chat-command fallback. Returns true once bound.
+  installCommand(): boolean {
+    if (menuStatus.command) return true;
     const MA: any = findByProps("sendMessage", "receiveMessage") || findByProps("sendMessage");
-    if (MA?.sendMessage) {
-      this.unpatches.push(
-        instead(MA, "sendMessage", (args: any[], orig: any) => {
-          const content = (args?.[1]?.content ?? "").trim().toLowerCase();
-          if (content === "/ayc" || content === ".ayc" || content === "/aycord") {
-            setTimeout(openMenu, 50);
-            return Promise.resolve(void 0);   // swallow the command message
-          }
-          return orig.apply(MA, args);
-        })
-      );
-      menuStatus.command = true;
-      console.log("[ayCORD] /ayc command ready");
-    }
+    if (!MA?.sendMessage) return false;
+    this.unpatches.push(
+      instead(MA, "sendMessage", (args: any[], orig: any) => {
+        const content = (args?.[1]?.content ?? "").trim().toLowerCase();
+        if (content === "/ayc" || content === ".ayc" || content === "/aycord") {
+          setTimeout(openMenu, 50);
+          return Promise.resolve(void 0);   // swallow the command message
+        }
+        return orig.apply(MA, args);
+      })
+    );
+    menuStatus.command = true;
+    console.log("[ayCORD] /ayc command ready");
+    return true;
+  },
+
+  start() {
+    // Some modules (messaging, settings) only become requireable after login,
+    // so a one-shot install at boot misses them. Install what's ready now, then
+    // retry the rest on a schedule until both bind (or we give up after ~90s).
+    const tryAll = () => this.installSettings() && this.installCommand();
+    if (tryAll()) return;
+
+    let tries = 0;
+    const tick = () => {
+      tries++;
+      if (tryAll() || tries >= 45) {
+        console.log(`[ayCORD] menu install settled after ${tries} tr(ies): settings=${menuStatus.settings}, /ayc=${menuStatus.command ? "on" : "off"}`);
+        return;
+      }
+      setTimeout(tick, 2000);
+    };
+    setTimeout(tick, 2000);
   },
 
   stop() { this.unpatches.forEach((u) => u()); this.unpatches = []; },
