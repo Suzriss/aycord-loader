@@ -3,6 +3,7 @@
 // stays visible (dimmed), and we keep every edited version in an editHistory[].
 import { before } from "../core/patcher";
 import { FluxDispatcher, MessageStore } from "../core/api";
+import { storage } from "../core/storage";
 import type { Plugin } from "../index";
 
 const plugin: Plugin = {
@@ -19,6 +20,7 @@ const plugin: Plugin = {
       before(Dispatcher, "dispatch", (args: any[]) => {
         const action = args[0];
         if (!action) return;
+        if (!storage.get<boolean>("antidelete.on", true)) return;   // toggle from menu
 
         if (action.type === "MESSAGE_DELETE") {
           const msg = MessageStore()?.getMessage?.(action.channelId, action.id);

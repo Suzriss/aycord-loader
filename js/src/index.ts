@@ -1,6 +1,7 @@
 // ayCORD JS entrypoint — evaluated on Discord's RN bridge after its own bundle.
 import antiDelete from "./plugins/anti-delete";
 import vault from "./plugins/vault";
+import menu from "./plugins/menu";
 import { initStorage } from "./core/storage";
 
 export interface Plugin {
@@ -12,6 +13,7 @@ export interface Plugin {
 }
 
 const plugins: Plugin[] = [
+  menu,
   vault,
   antiDelete,
   // media-tools, ghost-mode, emoji-ripper, reminders, notes,
