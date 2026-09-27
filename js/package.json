@@ -1,0 +1,13 @@
+{
+  "name": "aycord-js",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ayCORD JS runtime injected into Discord (RN/Hermes)",
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.23.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,6 @@
+js/node_modules/
+.theos/
+packages/
+obj/
+Resources/aycord.js
+out/

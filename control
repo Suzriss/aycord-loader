@@ -1,0 +1,8 @@
+Package: com.ceresify.aycord
+Name: ayCORD
+Version: 0.1.0
+Architecture: iphoneos-arm64
+Description: Enhanced Discord client — privacy, media & QoL features by Ceresify
+Maintainer: Ceresify
+Author: Ceresify
+Section: Tweaks

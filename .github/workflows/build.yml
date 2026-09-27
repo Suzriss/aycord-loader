@@ -1,0 +1,58 @@
+name: Build Loader
+
+permissions:
+  contents: write
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15   # unlimited free minutes on public repos
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build JS payload
+        working-directory: js
+        run: |
+          npm install
+          npm run build
+          test -s ../Resources/aycord.js && echo "aycord.js OK"
+
+      - name: Set up Theos
+        uses: waruhachi/theos-action@v2.4.6
+        with:
+          theos-src: 'waruhachi/theos'
+          theos-branch: 'main'
+          sdks-src: 'waruhachi/sdks'
+          sdks-branch: 'main'
+
+      - name: Build package
+        run: make clean package FINALPACKAGE=1 STRIP=0 THEOS_PACKAGE_SCHEME=rootless
+
+      - name: Stage artifacts (deb + raw dylib + js)
+        run: |
+          mkdir -p out
+          cp packages/*.deb out/ 2>/dev/null || true
+          find . -name 'libayCORD.dylib' -exec cp {} out/ \; 2>/dev/null || true
+          cp Resources/aycord.js out/ 2>/dev/null || true
+          ls -la out/
+
+      - name: Publish to 'loader' release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: loader
+          name: ayCORD loader build
+          files: |
+            out/*.deb
+            out/libayCORD.dylib
+            out/aycord.js
+          draft: false
+          prerelease: false
+          make_latest: true
