@@ -3,6 +3,29 @@ import antiDelete from "./plugins/anti-delete";
 import vault from "./plugins/vault";
 import menu, { menuStatus, note } from "./plugins/menu";
 import { initStorage } from "./core/storage";
+import { metroDiag } from "./core/metro";
+
+// Metro-independent native alert: reach RN's AlertManager straight through the
+// TurboModule / native-module proxy globals, without going through the module
+// registry. This is our proof the payload evaluated even when metro finds
+// nothing — the one signal that separates "payload didn't run" from
+// "metro is broken".
+function rnNativeAlert(title: string, msg: string): boolean {
+  const g: any = globalThis as any;
+  let AM: any;
+  try { AM = g.__turboModuleProxy && g.__turboModuleProxy("AlertManager"); } catch {}
+  if (!AM) { try { AM = g.RN$Bridgeless && g.__turboModuleProxy && g.__turboModuleProxy("RCTAlertManager"); } catch {} }
+  if (!AM && g.nativeModuleProxy) AM = g.nativeModuleProxy.AlertManager || g.nativeModuleProxy.RCTAlertManager;
+  try {
+    if (AM?.alertWithArgs) {
+      AM.alertWithArgs({ title, message: msg, buttons: [{ "0": "OK" }], cancelButtonKey: "0" }, () => {});
+      return true;
+    }
+  } catch {}
+  // Last resort: at least prove eval reached here, in the device console.
+  try { g.nativeLoggingHook?.("[ayCORD] " + title + ": " + msg, 3); } catch {}
+  return false;
+}
 
 export interface Plugin {
   id: string;
@@ -33,12 +56,25 @@ function startPlugins() {
   };
   console.log("[ayCORD] ready");
 
-  // Visible confirmation that the payload runs (no console needed on device).
+  // Visible confirmation via Discord's own toast (needs metro).
   const where = menuStatus.settings === "none" ? "اكتب .ayc بأي محادثة" : "الإعدادات ← ayCORD";
   setTimeout(() => note("ayCORD اشتغل ✅ — " + where), 1500);
+
+  // Metro-independent diagnostic alert: proves the payload evaluated and shows
+  // exactly what metro saw — so we can tell "didn't run" from "found nothing".
+  const d = metroDiag();
+  setTimeout(() => rnNativeAlert(
+    "ayCORD JS ✓",
+    "الـpayload اشتغل\nrequire: " + d.req + "\nmodules: " + d.count +
+    "\nsettings: " + menuStatus.settings + " | /ayc: " + (menuStatus.command ? "on" : "off")
+  ), 800);
 }
 
 async function boot() {
+  // Earliest possible proof the payload evaluated — before anything can fail.
+  rnNativeAlert("ayCORD JS boot", "بدأ التشغيل — require=" +
+    (typeof (globalThis as any).__r === "function" ? "__r" :
+     typeof (globalThis as any).metroRequire === "function" ? "metroRequire" : "NONE"));
   await initStorage();      // load persisted vault/config from MMKV first
   startPlugins();
 }

@@ -74,6 +74,18 @@ function range(a: number, b: number) {
   const out = []; for (let i = a; i < b; i++) out.push(i); return out;
 }
 
+// Diagnostic snapshot — which require global bound and how many modules we
+// indexed. Forces indexing so callers get a real count. Never throws.
+export function metroDiag(): { req: string; count: number } {
+  try {
+    const r = metroRequire();
+    const mods = allModules();
+    return { req: r ? ((r as any).name || "anon") : "NONE", count: mods.length };
+  } catch (e) {
+    return { req: "ERR:" + e, count: 0 };
+  }
+}
+
 export function find(filter: Filter): any {
   for (const m of allModules()) {
     try { if (filter(m)) return m; } catch {}
