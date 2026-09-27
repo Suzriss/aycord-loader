@@ -13,11 +13,61 @@
 // -----------------------------------------------------------------------------
 
 #import <Foundation/Foundation.h>
+#import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
 
 static BOOL gInjected = NO;
 static void (*gOrigExec)(id, SEL, NSData *, NSURL *, BOOL) = NULL;
+
+// ---- Native proof-of-life ---------------------------------------------------
+// A visible confirmation that runs entirely from the native side — no JS, no
+// Metro — so a "nothing appears" report can be split into "dylib didn't load"
+// vs. "payload/metro failed". Presented once, on the key window's root VC,
+// retrying until UIKit has a window to present on. Fully guarded: can't crash.
+static BOOL gNoticeShown = NO;
+
+static UIViewController *AYCTopViewController(void) {
+    UIWindow *key = nil;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (scene.activationState == UISceneActivationStateForegroundActive &&
+            [scene isKindOfClass:UIWindowScene.class]) {
+            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                if (w.isKeyWindow) { key = w; break; }
+            }
+            if (!key) key = ((UIWindowScene *)scene).windows.firstObject;
+        }
+        if (key) break;
+    }
+    UIViewController *vc = key.rootViewController;
+    while (vc.presentedViewController) vc = vc.presentedViewController;
+    return vc;
+}
+
+static void AYCNativeNotice(NSString *msg, int retriesLeft) {
+    if (gNoticeShown) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (gNoticeShown) return;
+        UIViewController *top = AYCTopViewController();
+        if (!top) {
+            if (retriesLeft > 0) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)),
+                               dispatch_get_main_queue(), ^{ AYCNativeNotice(msg, retriesLeft - 1); });
+            }
+            return;
+        }
+        gNoticeShown = YES;
+        @try {
+            UIAlertController *a = [UIAlertController alertControllerWithTitle:@"ayCORD"
+                                                                      message:msg
+                                                               preferredStyle:UIAlertControllerStyleAlert];
+            [a addAction:[UIAlertAction actionWithTitle:@"تمام" style:UIAlertActionStyleDefault handler:nil]];
+            [top presentViewController:a animated:YES completion:nil];
+        } @catch (NSException *e) {
+            NSLog(@"[ayCORD] native notice failed: %@", e);
+        }
+    });
+}
 
 static NSString *AYCReadPayload(void) {
     NSString *path = [[NSBundle mainBundle] pathForResource:@"aycord" ofType:@"js"];
@@ -50,6 +100,7 @@ static void AYCExec(id self, SEL _cmd, NSData *script, NSURL *url, BOOL async) {
     if (!data) return;
     NSLog(@"[ayCORD] injecting payload via bridge (%lu bytes)", (unsigned long)data.length);
     if (gOrigExec) gOrigExec(self, _cmd, data, [NSURL URLWithString:@"aycord://payload.js"], async);
+    AYCNativeNotice(@"اللودر اشتغل والحقن تم (bridge).\nإذا ما ظهر منيو ايكورد بالإعدادات، اكتب ‎.ayc بأي محادثة.", 40);
 }
 
 // ---- Bridgeless (RCTHost / RCTInstance) ---------------------------------------
@@ -80,6 +131,7 @@ static void AYCLoadSrc(id self, SEL _cmd, id source) {
     }
     NSLog(@"[ayCORD] injecting payload via bridgeless (%lu bytes)", (unsigned long)data.length);
     gOrigLoadSrc(self, _cmd, ours);
+    AYCNativeNotice(@"اللودر اشتغل والحقن تم (bridgeless).\nإذا ما ظهر منيو ايكورد بالإعدادات، اكتب ‎.ayc بأي محادثة.", 40);
 }
 
 static BOOL AYCTryInstall(void) {

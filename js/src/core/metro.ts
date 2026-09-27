@@ -10,26 +10,63 @@ type Filter = (exp: any, id?: number) => boolean;
 
 const cache: any[] = [];
 
+// The Metro require global isn't always named `__r` — resolve it once, trying
+// every name Discord/RN builds have shipped it under. Whatever we find here is
+// the single thing every finder depends on, so we log loudly if it's missing.
+let reqResolved = false;
+let req: ((id: number) => any) | undefined;
+
+function metroRequire(): ((id: number) => any) | undefined {
+  if (reqResolved) return req;
+  reqResolved = true;
+  const g: any = globalThis as any;
+  const cands = [
+    typeof __r !== "undefined" ? __r : undefined,
+    g.__r, g.metroRequire, g.__metroRequire, g.require,
+  ];
+  for (const c of cands) {
+    if (typeof c === "function") { req = c; break; }
+  }
+  console.log(req
+    ? "[ayCORD] metro require resolved (" + ((req as any).name || "anon") + ")"
+    : "[ayCORD] metro require NOT FOUND — no globals (__r/metroRequire/require); metro disabled");
+  return req;
+}
+
+// Try to get the module-id registry without executing anything. Most release
+// builds keep `modules` closure-local (not global) and expose no getModules(),
+// so we fall back to brute-forcing a wide id range.
+function moduleIds(r: (id: number) => any): number[] {
+  const g: any = globalThis as any;
+  const reg: any =
+    (typeof modules !== "undefined" && modules) ||
+    g.modules ||
+    g.__d?.modules ||
+    (r as any)?.getModules?.() ||
+    null;
+  if (reg) {
+    const keys = Object.keys(reg);
+    if (keys.length) { console.log("[ayCORD] module registry found (" + keys.length + " ids)"); return keys.map(Number); }
+  }
+  console.log("[ayCORD] no module registry exposed — brute-forcing ids 0..40000");
+  return range(0, 40000);
+}
+
 function allModules(): any[] {
   if (cache.length) return cache;
-  // Metro exposes the module table on the global require in dev-ish builds;
-  // fall back to brute-forcing ids until requires start throwing "not found".
-  const reg: Record<number, any> =
-    (typeof modules !== "undefined" && modules) ||
-    (globalThis as any).modules ||
-    (__r as any)?.getModules?.() || {};
+  const r = metroRequire();
+  if (!r) return cache;   // nothing we can do without require
 
-  const ids = Object.keys(reg);
-  const scan = ids.length ? ids.map(Number) : range(0, 20000);
-
-  for (const id of scan) {
+  let attempted = 0, threw = 0;
+  for (const id of moduleIds(r)) {
     let exp: any;
-    try { exp = __r(id); } catch { continue; }
+    attempted++;
+    try { exp = r(id); } catch { threw++; continue; }
     if (exp == null) continue;
     cache.push(exp);
     if (exp.default && exp.__esModule) cache.push(exp.default);
   }
-  console.log(`[ayCORD] indexed ${cache.length} modules`);
+  console.log(`[ayCORD] indexed ${cache.length} modules (tried ${attempted}, ${threw} threw)`);
   return cache;
 }
 
