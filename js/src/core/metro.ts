@@ -162,3 +162,19 @@ export const findByStoreName = (name: string) =>
 export const findByName = (name: string) =>
   find((m) => m?.name === name && typeof m === "function") ||
   find((m) => m?.default?.name === name)?.default;
+
+// Like findByName, but returns the *module holder* + the key that points at the
+// named function, so callers can patch it in place (patching a copy is a no-op).
+export function findByNameHolder(name: string): { mod: any; key: string } | undefined {
+  for (const m of allModules()) {
+    try {
+      if (m && typeof m.default === "function" && m.default.name === name) return { mod: m, key: "default" };
+      if (m && typeof m === "object") {
+        for (const k of Object.keys(m)) {
+          if (typeof m[k] === "function" && m[k].name === name) return { mod: m, key: k };
+        }
+      }
+    } catch {}
+  }
+  return undefined;
+}

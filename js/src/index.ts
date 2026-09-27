@@ -3,7 +3,7 @@ import antiDelete from "./plugins/anti-delete";
 import vault from "./plugins/vault";
 import menu, { menuStatus, note } from "./plugins/menu";
 import { initStorage } from "./core/storage";
-import { metroDiag } from "./core/metro";
+import { metroDiag, findByProps, findByName, findByNameHolder } from "./core/metro";
 
 // Metro-independent native alert: reach RN's AlertManager straight through the
 // TurboModule / native-module proxy globals, without going through the module
@@ -60,16 +60,29 @@ function startPlugins() {
   const where = menuStatus.settings === "none" ? "اكتب .ayc بأي محادثة" : "الإعدادات ← ayCORD";
   setTimeout(() => note("ayCORD اشتغل ✅ — " + where), 1500);
 
-  // One concise confirmation. Settings/‏/ayc may still be "off" here if shown on
-  // the login screen — they bind via retry once Discord finishes loading.
+  // Detailed probe ~30s after boot (by then the user is usually logged in), so
+  // one screenshot shows exactly which finders resolve. Purely diagnostic.
+  setTimeout(() => rnNativeAlert("ayCORD probe", probe()), 30000);
+}
+
+function yn(x: any): string { return x ? "Y" : "N"; }
+
+function probe(): string {
   const d = metroDiag();
-  setTimeout(() => rnNativeAlert(
-    "ayCORD ✓",
-    "اشتغل — modules: " + d.count +
-    "\nصف الإعدادات: " + (menuStatus.settings !== "none" ? "جاهز" : "ينتظر") +
-    " | /ayc: " + (menuStatus.command ? "on" : "ينتظر الدخول") +
-    "\n(سجّل دخول، بعدين افتح الإعدادات أو اكتب ‎.ayc)"
-  ), 1200);
+  const sov = findByName("SettingsOverviewScreen");
+  const sovH = findByNameHolder("SettingsOverviewScreen");
+  return [
+    "modules: " + d.count,
+    "sendMessage(+edit): " + yn(findByProps("sendMessage", "editMessage")),
+    "sendMessage: " + yn(findByProps("sendMessage")),
+    "SETTING_RENDERER_CONFIG: " + yn(findByProps("SETTING_RENDERER_CONFIG")),
+    "createList: " + yn(findByProps("createList")),
+    "SettingsOverview: fn=" + yn(sov) + " holder=" + yn(sovH),
+    "showToast: " + yn(findByProps("showToast")),
+    "FormRow: " + yn(findByProps("FormRow")),
+    "actionSheet: " + yn(findByProps("showSimpleActionSheet")),
+    "bound → settings:" + menuStatus.settings + " /ayc:" + (menuStatus.command ? "on" : "off"),
+  ].join("\n");
 }
 
 async function boot() {

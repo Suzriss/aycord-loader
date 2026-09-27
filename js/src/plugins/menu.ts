@@ -2,8 +2,8 @@
 // controls, plus a guaranteed "/ayc" chat-command fallback that opens the same
 // menu (in case the settings injection doesn't bind on a given Discord build).
 import { after, before, instead } from "../core/patcher";
-import { findByProps } from "../core/metro";
-import { React, Alert, actionSheet, prompt, SettingsOverview } from "../core/ui";
+import { findByProps, findByNameHolder } from "../core/metro";
+import { React, Alert, actionSheet, prompt } from "../core/ui";
 import { SelectedChannelStore } from "../core/api";
 import { storage } from "../core/storage";
 import type { Plugin } from "../index";
@@ -126,18 +126,18 @@ const plugin: Plugin = {
       console.log("[ayCORD] settings row hooked (config)");
       return true;
     }
-    const ov: any = SettingsOverview();
-    const holder = ov && ("default" in ov ? ov : { default: ov });
-    if (holder?.default) {
+    // Patch the REAL module holder (patching a copied ref never fires).
+    const h = findByNameHolder("SettingsOverviewScreen");
+    if (h?.mod && typeof h.mod[h.key] === "function") {
       this.unpatches.push(
-        after(holder, "default", (_args: any[], ret: any) => {
+        after(h.mod, h.key, (_args: any[], ret: any) => {
           try { const el = buildRow(); if (el) injectTop(ret, el); }
           catch (e) { console.log("[ayCORD] settings inject failed: " + e); }
           return ret;
         })
       );
       menuStatus.settings = "overview";
-      console.log("[ayCORD] settings row hooked (overview)");
+      console.log("[ayCORD] settings row hooked (overview, real holder)");
       return true;
     }
     return false;
